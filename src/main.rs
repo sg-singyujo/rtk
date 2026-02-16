@@ -18,6 +18,7 @@ mod git;
 mod go_cmd;
 mod golangci_cmd;
 mod grep_cmd;
+mod hook_cmd;
 mod init;
 mod json_cmd;
 mod learn;
@@ -516,6 +517,10 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+
+    /// Hook rewrite for Claude Code PreToolUse (internal)
+    #[command(name = "hook-rewrite", hide = true)]
+    HookRewrite,
 }
 
 #[derive(Subcommand)]
@@ -1357,6 +1362,8 @@ fn main() -> Result<()> {
         Commands::GolangciLint { args } => {
             golangci_cmd::run(&args, cli.verbose)?;
         }
+
+        Commands::HookRewrite => hook_cmd::run(),
 
         Commands::Proxy { args } => {
             use std::process::Command;
