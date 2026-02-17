@@ -18,6 +18,7 @@ mod git;
 mod go_cmd;
 mod golangci_cmd;
 mod grep_cmd;
+mod hook_audit_cmd;
 mod hook_cmd;
 mod init;
 mod json_cmd;
@@ -39,6 +40,7 @@ mod read;
 mod ruff_cmd;
 mod runner;
 mod summary;
+mod tee;
 mod tracking;
 mod tree;
 mod tsc_cmd;
@@ -521,6 +523,14 @@ enum Commands {
     /// Hook rewrite for Claude Code PreToolUse (internal)
     #[command(name = "hook-rewrite", hide = true)]
     HookRewrite,
+
+    /// Show hook rewrite audit metrics (requires RTK_HOOK_AUDIT=1)
+    #[command(name = "hook-audit")]
+    HookAudit {
+        /// Show entries from last N days (0 = all time)
+        #[arg(short, long, default_value = "7")]
+        since: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1364,6 +1374,10 @@ fn main() -> Result<()> {
         }
 
         Commands::HookRewrite => hook_cmd::run(),
+
+        Commands::HookAudit { since } => {
+            hook_audit_cmd::run(since, cli.verbose)?;
+        }
 
         Commands::Proxy { args } => {
             use std::process::Command;
