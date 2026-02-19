@@ -240,11 +240,11 @@ SHARED            utils.rs          Helpers                N/A        ✓
                   tee.rs            Full output recovery   N/A        ✓
 ```
 
-**Total: 47 modules** (29 command modules + 18 infrastructure modules)
+**Total: 49 modules** (31 command modules + 18 infrastructure modules)
 
 ### Module Count Breakdown
 
-- **Command Modules**: 29 (directly exposed to users)
+- **Command Modules**: 31 (directly exposed to users)
 - **Infrastructure Modules**: 18 (utils, filter, tracking, tee, config, init, gain, etc.)
 - **Git Commands**: 7 operations (status, diff, log, add, commit, push, branch/checkout)
 - **JS/TS Tooling**: 8 modules (modern frontend/fullstack development)
@@ -1435,4 +1435,4 @@ When implementing a new command, consider:
 
 **Last Updated**: 2026-02-12
 **Architecture Version**: 2.1
-**rtk Version**: 0.18.0
+**rtk Version**: 0.19.0

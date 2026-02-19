@@ -6,7 +6,6 @@ on:
       - 'src/**/*.rs'
       - 'Cargo.toml'
       - '**.md'
-      - '.claude/hooks/*.sh'
   push:
     branches:
       - master
@@ -54,15 +53,16 @@ jobs:
 
       - name: Verify hook coverage
         run: |
-          HOOK_FILE=".claude/hooks/rtk-rewrite.sh"
-          if [ ! -f "$HOOK_FILE" ]; then
-            echo "❌ Hook file not found: $HOOK_FILE"
+          # Check native hook module (src/hook/) for command coverage
+          HOOK_DIR="src/hook"
+          if [ ! -d "$HOOK_DIR" ]; then
+            echo "❌ Hook module directory not found: $HOOK_DIR"
             exit 1
           fi
 
           for cmd in ruff pytest pip "go " golangci; do
-            if ! grep -q "$cmd" "$HOOK_FILE"; then
-              echo "❌ Hook missing rewrite for: $cmd"
+            if ! grep -rq "$cmd" "$HOOK_DIR"; then
+              echo "❌ Hook module missing rewrite for: $cmd"
               exit 1
             fi
           done
