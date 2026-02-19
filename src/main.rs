@@ -18,8 +18,8 @@ mod git;
 mod go_cmd;
 mod golangci_cmd;
 mod grep_cmd;
+mod hook;
 mod hook_audit_cmd;
-mod hook_cmd;
 mod init;
 mod json_cmd;
 mod learn;
@@ -1373,7 +1373,7 @@ fn main() -> Result<()> {
             golangci_cmd::run(&args, cli.verbose)?;
         }
 
-        Commands::HookRewrite => hook_cmd::run(),
+        Commands::HookRewrite => hook::run(),
 
         Commands::HookAudit { since } => {
             hook_audit_cmd::run(since, cli.verbose)?;
