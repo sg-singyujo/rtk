@@ -27,6 +27,7 @@ mod lint_cmd;
 mod local_llm;
 mod log_cmd;
 mod ls;
+mod mypy_cmd;
 mod next_cmd;
 mod npm_cmd;
 mod parser;
@@ -249,6 +250,9 @@ enum Commands {
         /// Filter by file type (e.g., ts, py, rust)
         #[arg(short = 't', long)]
         file_type: Option<String>,
+        /// Show line numbers (always on, accepted for grep/rg compatibility)
+        #[arg(short = 'n', long)]
+        line_numbers: bool,
         /// Extra ripgrep arguments (e.g., -i, -A 3, -w, --glob)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         extra_args: Vec<String>,
@@ -306,6 +310,9 @@ enum Commands {
 
     /// Show token savings summary and history
     Gain {
+        /// Filter statistics to current project (current working directory) // added
+        #[arg(short, long)]
+        project: bool,
         /// Show ASCII graph of daily savings
         #[arg(short, long)]
         graph: bool,
@@ -503,6 +510,13 @@ enum Commands {
     /// Pytest test runner with compact output
     Pytest {
         /// Pytest arguments
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
+    /// Mypy type checker with grouped error output
+    Mypy {
+        /// Mypy arguments
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -1094,6 +1108,7 @@ fn main() -> Result<()> {
             max,
             context_only,
             file_type,
+            line_numbers: _, // no-op: line numbers always enabled in grep_cmd::run
             extra_args,
         } => {
             grep_cmd::run(
@@ -1146,6 +1161,7 @@ fn main() -> Result<()> {
         }
 
         Commands::Gain {
+            project, // added
             graph,
             history,
             quota,
@@ -1157,6 +1173,7 @@ fn main() -> Result<()> {
             format,
         } => {
             gain::run(
+                project, // added: pass project flag
                 graph,
                 history,
                 quota,
@@ -1403,6 +1420,10 @@ fn main() -> Result<()> {
 
         Commands::Pytest { args } => {
             pytest_cmd::run(&args, cli.verbose)?;
+        }
+
+        Commands::Mypy { args } => {
+            mypy_cmd::run(&args, cli.verbose)?;
         }
 
         Commands::Pip { args } => {
