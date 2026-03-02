@@ -28,6 +28,76 @@ pub fn try_rewrite_head(match_cmd: &str) -> Option<String> {
     None
 }
 
+/// Grep/rg flags that take a value argument (next token is the value, not a positional).
+const GREP_FLAGS_WITH_VALUE: &[&str] = &[
+    "-A",
+    "-B",
+    "-C",
+    "-e",
+    "-f",
+    "-m",
+    "--max-count",
+    "--include",
+    "--exclude",
+    "--exclude-dir",
+    "--glob",
+    "--type",
+    "--type-not",
+    "--type-add",
+    "-g",
+    "-t",
+    "-T",
+];
+
+/// Reorder grep/rg arguments so positionals come before flags.
+/// RTK's clap expects: `rtk grep PATTERN [PATH] [-- extra_flags...]`
+/// but real usage is `grep -r -i PATTERN .` (flags first).
+fn reorder_grep_args(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return "rtk grep".to_string();
+    }
+
+    let tokens: Vec<&str> = parts[1].split_whitespace().collect();
+    let mut flags: Vec<&str> = Vec::new();
+    let mut positionals: Vec<&str> = Vec::new();
+    let mut i = 0;
+
+    while i < tokens.len() {
+        let tok = tokens[i];
+        if tok == "--" {
+            positionals.extend_from_slice(&tokens[i + 1..]);
+            break;
+        } else if tok.starts_with('-') {
+            flags.push(tok);
+            // Consume next token if this flag takes a value
+            if GREP_FLAGS_WITH_VALUE.contains(&tok) {
+                i += 1;
+                if i < tokens.len() {
+                    flags.push(tokens[i]);
+                }
+            }
+        } else {
+            positionals.push(tok);
+        }
+        i += 1;
+    }
+
+    let mut result = String::from("rtk grep");
+    for p in &positionals {
+        result.push(' ');
+        result.push_str(p);
+    }
+    if !flags.is_empty() {
+        result.push_str(" --");
+        for f in &flags {
+            result.push(' ');
+            result.push_str(f);
+        }
+    }
+    result
+}
+
 /// Try to rewrite file operation commands (cat, grep, ls, tree, find, diff, curl, wget).
 /// Returns Some(rewritten) if matched, None otherwise.
 pub fn try_rewrite_file_cmd(match_cmd: &str, cmd_body: &str) -> Option<String> {
@@ -45,11 +115,8 @@ pub fn try_rewrite_file_cmd(match_cmd: &str, cmd_body: &str) -> Option<String> {
         }
         return Some(replace_prefix(cmd_body, "cat ", "rtk read "));
     }
-    if match_cmd.starts_with("rg ") {
-        return Some(replace_prefix(cmd_body, "rg ", "rtk grep "));
-    }
-    if match_cmd.starts_with("grep ") {
-        return Some(replace_prefix(cmd_body, "grep ", "rtk grep "));
+    if match_cmd.starts_with("rg ") || match_cmd.starts_with("grep ") {
+        return Some(reorder_grep_args(match_cmd));
     }
     if match_cmd == "ls" || match_cmd.starts_with("ls ") {
         return Some(replace_prefix(cmd_body, "ls", "rtk ls"));
@@ -104,8 +171,8 @@ mod tests {
     }
 
     #[test]
-    fn test_grep_to_rtk_grep() {
-        assert_eq!(rewrite("grep -r TODO ."), Some("rtk grep -r TODO .".into()));
+    fn test_grep_no_flags() {
+        assert_eq!(rewrite("grep TODO ."), Some("rtk grep TODO .".into()));
     }
 
     #[test]
@@ -190,5 +257,62 @@ mod tests {
     fn test_cat_stdin_no_rewrite() {
         // cat - reads from stdin, rtk read doesn't support it
         assert_eq!(rewrite("cat -"), None);
+    }
+
+    // --- P1-2: grep/rg flags reordered for clap compatibility ---
+    // rtk grep expects: PATTERN [PATH] [-- extra_flags...]
+    // Real usage: grep -r TODO . (flags first) → reorder to: rtk grep TODO . -- -r
+    #[test]
+    fn test_grep_flags_reordered() {
+        assert_eq!(
+            rewrite("grep -r TODO ."),
+            Some("rtk grep TODO . -- -r".into())
+        );
+    }
+
+    #[test]
+    fn test_grep_multiple_flags_reordered() {
+        assert_eq!(
+            rewrite("grep -r -i pattern src/"),
+            Some("rtk grep pattern src/ -- -r -i".into())
+        );
+    }
+
+    #[test]
+    fn test_grep_combined_flags_reordered() {
+        assert_eq!(
+            rewrite("grep -rn pattern src/"),
+            Some("rtk grep pattern src/ -- -rn".into())
+        );
+    }
+
+    #[test]
+    fn test_rg_flags_reordered() {
+        assert_eq!(
+            rewrite("rg -i pattern ."),
+            Some("rtk grep pattern . -- -i".into())
+        );
+    }
+
+    #[test]
+    fn test_grep_flag_with_value() {
+        // -A 3 consumes next token as value
+        assert_eq!(
+            rewrite("grep -A 3 pattern ."),
+            Some("rtk grep pattern . -- -A 3".into())
+        );
+    }
+
+    #[test]
+    fn test_grep_no_flags_no_separator() {
+        assert_eq!(rewrite("grep TODO src/"), Some("rtk grep TODO src/".into()));
+    }
+
+    #[test]
+    fn test_rg_no_flags_no_separator() {
+        assert_eq!(
+            rewrite("rg pattern src/"),
+            Some("rtk grep pattern src/".into())
+        );
     }
 }
