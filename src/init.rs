@@ -730,12 +730,9 @@ fn run_default_mode(
     patch_mode: PatchMode,
     verbose: u8,
 ) -> Result<()> {
+    // Windows: always use native hook (bash not available)
     if !native_hook {
-        // Windows without --native-hook: fall back to --claude-md mode
-        eprintln!("Bash hook requires Unix (macOS/Linux).");
-        eprintln!("Use --native-hook for cross-platform support, or --claude-md for legacy mode.");
-        eprintln!("Falling back to --claude-md mode.");
-        return run_claude_md_mode(global, verbose);
+        eprintln!("Using native hook (default on Windows).");
     }
     run_native_hook_mode(global, patch_mode, verbose)
 }
