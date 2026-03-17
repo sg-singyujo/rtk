@@ -29,6 +29,11 @@ pub fn status() -> HookStatus {
     let Some(hook_path) = hook_installed_path() else {
         return HookStatus::Missing;
     };
+    // Native hook lives in settings.json — no version tag needed, always current
+    if hook_path.ends_with("settings.json") {
+        return HookStatus::Ok;
+    }
+
     let Ok(content) = std::fs::read_to_string(&hook_path) else {
         return HookStatus::Outdated; // exists but unreadable — treat as needs-update
     };
@@ -88,12 +93,30 @@ pub fn parse_hook_version(content: &str) -> u8 {
 
 fn hook_installed_path() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let path = home.join(".claude").join("hooks").join("rtk-rewrite.sh");
-    if path.exists() {
-        Some(path)
-    } else {
-        None
+
+    // Check bash hook
+    let bash_hook = home.join(".claude").join("hooks").join("rtk-rewrite.sh");
+    if bash_hook.exists() {
+        return Some(bash_hook);
     }
+
+    // Check native hook in settings.json (command: "rtk hook-rewrite")
+    if native_hook_in_settings(&home) {
+        // Return a sentinel — the "hook" lives in settings.json, not a file
+        return Some(home.join(".claude").join("settings.json"));
+    }
+
+    None
+}
+
+/// Check if native hook ("rtk hook-rewrite") is registered in Claude Code settings.json
+fn native_hook_in_settings(home: &std::path::Path) -> bool {
+    let settings_path = home.join(".claude").join("settings.json");
+    let content = match std::fs::read_to_string(&settings_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    content.contains("rtk hook-rewrite")
 }
 
 fn warn_marker_path() -> Option<PathBuf> {
@@ -141,24 +164,25 @@ mod tests {
 
     #[test]
     fn test_status_returns_valid_variant() {
-        // Skip on machines without Claude Code or without hook
+        // Skip on machines without Claude Code
         let home = match dirs::home_dir() {
             Some(h) => h,
             None => return,
         };
-        if !home
+        if !home.join(".claude").exists() {
+            assert_eq!(status(), HookStatus::Ok);
+            return;
+        }
+
+        let has_bash_hook = home
             .join(".claude")
             .join("hooks")
             .join("rtk-rewrite.sh")
-            .exists()
-        {
-            // No hook — status should be Missing (if .claude exists) or Ok (if not)
-            let s = status();
-            if home.join(".claude").exists() {
-                assert_eq!(s, HookStatus::Missing);
-            } else {
-                assert_eq!(s, HookStatus::Ok);
-            }
+            .exists();
+        let has_native_hook = native_hook_in_settings(&home);
+
+        if !has_bash_hook && !has_native_hook {
+            assert_eq!(status(), HookStatus::Missing);
             return;
         }
         let s = status();
@@ -167,5 +191,21 @@ mod tests {
             "Expected Ok or Outdated when hook exists, got {:?}",
             s
         );
+    }
+
+    #[test]
+    fn test_native_hook_detection() {
+        // If settings.json contains "rtk hook-rewrite", native hook is detected
+        let home = match dirs::home_dir() {
+            Some(h) => h,
+            None => return,
+        };
+        let settings = home.join(".claude").join("settings.json");
+        if !settings.exists() {
+            return;
+        }
+        let content = std::fs::read_to_string(&settings).unwrap_or_default();
+        let expected = content.contains("rtk hook-rewrite");
+        assert_eq!(native_hook_in_settings(&home), expected);
     }
 }
