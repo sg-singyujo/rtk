@@ -1,11 +1,12 @@
 use crate::display_helpers::{format_duration, print_period_table};
+use crate::hook_check;
 use crate::tracking::{DayStats, MonthStats, Tracker, WeekStats};
 use crate::utils::format_tokens;
 use anyhow::{Context, Result};
-use colored::Colorize; // added: terminal colors
+use colored::Colorize;
 use serde::Serialize;
-use std::io::IsTerminal; // added: TTY detection for graceful degradation
-use std::path::PathBuf; // added: for project path resolution
+use std::io::IsTerminal;
+use std::path::PathBuf;
 
 pub fn run(
     project: bool, // added: per-project scope flag
@@ -18,10 +19,15 @@ pub fn run(
     monthly: bool,
     all: bool,
     format: &str,
+    failures: bool,
     _verbose: u8,
 ) -> Result<()> {
     let tracker = Tracker::new().context("Failed to initialize tracking database")?;
     let project_scope = resolve_project_scope(project)?; // added: resolve project path
+
+    if failures {
+        return show_failures(&tracker);
+    }
 
     // Handle export formats
     match format {
@@ -94,8 +100,34 @@ pub fn run(
                 format_duration(summary.avg_time_ms)
             ),
         );
-        print_efficiency_meter(summary.avg_savings_pct); // added: visual meter
+        print_efficiency_meter(summary.avg_savings_pct);
         println!();
+
+        // Warn about hook issues that silently kill savings (stderr, not stdout)
+        match hook_check::status() {
+            hook_check::HookStatus::Missing => {
+                eprintln!(
+                    "{}",
+                    "⚠️  No hook installed — run `rtk init -g` for automatic token savings"
+                        .yellow()
+                );
+                eprintln!();
+            }
+            hook_check::HookStatus::Outdated => {
+                eprintln!(
+                    "{}",
+                    "⚠️  Hook outdated — run `rtk init -g` to update".yellow()
+                );
+                eprintln!();
+            }
+            hook_check::HookStatus::Ok => {}
+        }
+
+        // Lightweight RTK_DISABLED bypass check (best-effort, silent on failure)
+        if let Some(warning) = check_rtk_disabled_bypass() {
+            eprintln!("{}", warning.yellow());
+            eprintln!();
+        }
 
         if !summary.by_command.is_empty() {
             // added: styled section header
@@ -580,6 +612,111 @@ fn export_csv(
                 month.avg_time_ms
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Lightweight scan of recent Claude Code sessions for RTK_DISABLED= overuse.
+/// Returns a warning string if bypass rate exceeds 10%, None otherwise.
+/// Silently returns None on any error (missing dirs, permission issues, etc.).
+fn check_rtk_disabled_bypass() -> Option<String> {
+    use crate::discover::provider::{ClaudeProvider, SessionProvider};
+    use crate::discover::registry::has_rtk_disabled_prefix;
+
+    let provider = ClaudeProvider;
+
+    // Quick scan: last 7 days only
+    let sessions = provider.discover_sessions(None, Some(7)).ok()?;
+
+    // Early bail if no sessions or too many (avoid slow scan)
+    if sessions.is_empty() || sessions.len() > 200 {
+        return None;
+    }
+
+    let mut total_bash: usize = 0;
+    let mut bypassed: usize = 0;
+
+    for session_path in &sessions {
+        let extracted = match provider.extract_commands(session_path) {
+            Ok(cmds) => cmds,
+            Err(_) => continue,
+        };
+
+        for ext_cmd in &extracted {
+            total_bash += 1;
+            if has_rtk_disabled_prefix(&ext_cmd.command) {
+                bypassed += 1;
+            }
+        }
+    }
+
+    if total_bash == 0 {
+        return None;
+    }
+
+    let pct = (bypassed as f64 / total_bash as f64) * 100.0;
+    if pct > 10.0 {
+        Some(format!(
+            "⚠️  {} commands ({:.0}%) used RTK_DISABLED=1 unnecessarily — run `rtk discover` for details",
+            bypassed, pct
+        ))
+    } else {
+        None
+    }
+}
+
+fn show_failures(tracker: &Tracker) -> Result<()> {
+    let summary = tracker
+        .get_parse_failure_summary()
+        .context("Failed to load parse failure data")?;
+
+    if summary.total == 0 {
+        println!("No parse failures recorded.");
+        println!("This means all commands parsed successfully (or fallback hasn't triggered yet).");
+        return Ok(());
+    }
+
+    println!("{}", styled("RTK Parse Failures", true));
+    println!("{}", "═".repeat(60));
+    println!();
+
+    print_kpi("Total failures", summary.total.to_string());
+    print_kpi("Recovery rate", format!("{:.1}%", summary.recovery_rate));
+    println!();
+
+    if !summary.top_commands.is_empty() {
+        println!("{}", styled("Top Commands (by frequency)", true));
+        println!("{}", "─".repeat(60));
+        for (cmd, count) in &summary.top_commands {
+            let cmd_display = if cmd.len() > 50 {
+                format!("{}...", &cmd[..47])
+            } else {
+                cmd.clone()
+            };
+            println!("  {:>4}x  {}", count, cmd_display);
+        }
+        println!();
+    }
+
+    if !summary.recent.is_empty() {
+        println!("{}", styled("Recent Failures (last 10)", true));
+        println!("{}", "─".repeat(60));
+        for rec in &summary.recent {
+            let ts_short = if rec.timestamp.len() >= 16 {
+                &rec.timestamp[..16]
+            } else {
+                &rec.timestamp
+            };
+            let status = if rec.fallback_succeeded { "ok" } else { "FAIL" };
+            let cmd_display = if rec.raw_command.len() > 40 {
+                format!("{}...", &rec.raw_command[..37])
+            } else {
+                rec.raw_command.clone()
+            };
+            println!("  {} [{}] {}", ts_short, status, cmd_display);
+        }
+        println!();
     }
 
     Ok(())
